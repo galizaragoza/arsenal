@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 
@@ -30,24 +31,25 @@ func getPath(tool string) (string, error) {
 }
 
 func goNmap(c Config) error {
-	fmt.Println("Running Nmap scan...")
+	log.Println("Running Nmap scan...")
 	nmapPath, err := getPath("nmap")
 	if err != nil {
-		return err
+		return fmt.Errorf("Cancelling Nmap scan (it is not installed)")
 	}
-	fmt.Printf("Nmap is installed, %#v\n", nmapPath)
+	log.Printf("Nmap is installed, %#v\n", nmapPath)
+
 	xsltprocPath, err := getPath("xsltproc")
 	if err != nil {
 		return err
 	}
-	fmt.Printf("xsltproc is installed, %#v\n", xsltprocPath)
+	log.Printf("xsltproc is installed, %#v\n", xsltprocPath)
 
 	reportName := "autorecon_nmapScan.xml"
 	parsedReport := "autorecon_nmapScan.html"
 	var args []string
 
 	if c.IP == "" {
-		return fmt.Errorf("[X] Error: Nmap is being called but no IP was provided. Value of IP %#v", c.IP)
+		return fmt.Errorf("[0] Panic: Nmap is being called but no IP was provided. Value of IP %#v", c.IP)
 	}
 	switch c.Stealth {
 	case 1:
@@ -75,20 +77,20 @@ func goNmap(c Config) error {
 	}
 
 	cmd := exec.Command(nmapPath, args...)
-	fmt.Println("Scanning with nmap...")
+	log.Println("Scanning with nmap...")
 	err = cmd.Run()
 	if err != nil {
-		return fmt.Errorf("[X] Error: running the nmap scan:%#v", err)
+		log.Panicf("[!] Panic: running the nmap scan:%#v", err)
 	}
 
-	fmt.Println("Done scanning, parsing report...")
+	log.Println("Done scanning, parsing report...")
 
 	cmd = exec.Command(xsltprocPath, reportName, "-o", parsedReport)
 	err = cmd.Run()
 	if err != nil {
 		return err
 	}
-	fmt.Println("Nmap scan is complete")
+	log.Println("Nmap scan is complete")
 
 	return nil
 }
@@ -106,21 +108,24 @@ func goDNSrecon(c Config) error {
 	reportName := "autorecon_DNSrecon.xml"
 	parsedReport := "autorecon_DNSrecon.html"
 
-	fmt.Printf("DNSrecon is installed, %#v", binPath)
+	log.Printf("DNSrecon is installed, %#v", binPath)
 
 	if c.Domain == "" {
-		fmt.Printf("Domain is required to use DNSrecon, specify one, current value is %#v", c.Domain)
+		return fmt.Errorf("[0] Panic: Domain is required to use DNSrecon, specify one, current value is %#v", c.Domain)
 	}
 
 	args := []string{
 		"-d", c.Domain, "-absykez", "-x", "-t", "std",
 	}
+
 	cmd := exec.Command(binPath, args...)
-	fmt.Println("Running DNSrecon part 1/2...")
+	log.Println("Running DNSrecon part 1/2...")
+
 	err = cmd.Run()
 	if err != nil {
 		return fmt.Errorf("[X] Error: Error in DNS recon with args %#v", args)
 	}
+
 	cmd = exec.Command(xsltprocPath, reportName, "-o", parsedReport)
 	err = cmd.Run()
 	if err != nil {
@@ -153,12 +158,16 @@ func goWhatWeb(c Config) error {
 	case 5:
 		args = []string{"-a", "4", "--colour=auto", "-v", c.URL}
 	}
+
 	cmd := exec.Command(binPath, args...)
-	fmt.Println("Fingerprinting web technologies...")
+
+	log.Println("Fingerprinting web technologies...")
+
 	out, err := cmd.Output()
 	if err != nil {
 		return err
 	}
+
 	err = os.WriteFile(reportName, out, 0o444)
 	if err != nil {
 		return err
@@ -177,10 +186,12 @@ func goWafW00f(c Config) error {
 		return fmt.Errorf("URL value is empty, but it is required")
 	}
 
-	args := []string{"-a", "-o", reportName, "-f", "json", "-l"}
+	args := []string{"-a", "-o", reportName, "-f", "json", "-l", c.URL}
 
 	cmd := exec.Command(binPath, args...)
-	fmt.Println("Scanning for WAF...")
+
+	log.Println("Scanning for WAF...")
+
 	err = cmd.Run()
 	if err != nil {
 		return err
@@ -207,6 +218,10 @@ func main() {
 
 	g.Go(func() error {
 		return goWhatWeb(c)
+	})
+
+	g.Go(func() error {
+		return goWafW00f(c)
 	})
 
 	if err := g.Wait(); err != nil {
