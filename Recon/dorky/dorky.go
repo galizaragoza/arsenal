@@ -80,7 +80,7 @@ func dork(queries []string, engine string) (results []string, err error) {
 		if res.StatusCode == 200 && size >= 1024 && err == nil /*Placeholder*/ {
 			fmt.Printf("Query %d was succesful (dork: %s)\n", n, query)
 			fmt.Printf("Response size to set baseline (TESTING ONLY): %v\n", size)
-			fmt.Print(res.Body)
+			fmt.Print(res.ContentLength)
 			results = append(results, query)
 		} else {
 			return []string{}, err
