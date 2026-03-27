@@ -12,8 +12,8 @@ import (
 type Config struct {
 	Kali     bool `opts:"help=Run Kali, short=k"`
 	Lab      bool `opts:"help=Run 1st lab after Kali, short=l"`
-	LabIndex int  `opts:"help=Run lab number X in the order you imported them, short=li"`
-	KillAll  bool `opts:"help=Turn off every VM, short=ka"`
+	LabIndex int  `opts:"help=Run lab number X in the order you imported them"`
+	KillAll  bool `opts:"help=Turn off every VM"`
 }
 
 func main() {
