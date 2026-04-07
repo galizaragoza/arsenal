@@ -12,7 +12,7 @@ import (
 type Config struct {
 	Kali     bool `opts:"help=Run Kali, short=k"`
 	Lab      bool `opts:"help=Run 1st lab after Kali, short=l"`
-	LabIndex *int `opts:"help=Run lab number X in the order you imported them (-l is implicit), short=i"`
+	LabIndex int  `opts:"help=Run lab number X in the order you imported them (-l is implicit), short=i"`
 	StopAll  bool `opts:"help=Turn off every VM, short=s"`
 }
 
@@ -50,10 +50,10 @@ func main() {
 		runVM(kali)
 	}
 
-	if c.Lab || c.LabIndex != nil {
+	if c.Lab || c.LabIndex != 0 {
 		var lab *virtualbox.Machine
-		if c.LabIndex != nil {
-			index := int(*c.LabIndex)
+		if c.LabIndex != 0 {
+			index := int(c.LabIndex)
 			lab = machines[index]
 		} else {
 			lab = machines[1]
