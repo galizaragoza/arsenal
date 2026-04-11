@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"os/exec"
+	"regexp"
 	"time"
 
+	"github.com/fatih/color"
 	"github.com/jpillora/opts"
 	"github.com/sh-agilebot/go-virtualbox"
 )
@@ -23,7 +26,28 @@ func runVM(vm *virtualbox.Machine) {
 		fmt.Printf("Waiting for %s (UUID %s) to start...\n", vm.Name, vm.UUID)
 		vm.Refresh()
 	}
+
 	fmt.Printf("Machine %s (UUID %s) is %s\n", vm.Name, vm.UUID, vm.State)
+	fmt.Println("Trying to retrieve machine IP")
+
+	getIP := exec.Command("vboxmanage", "guestcontrol", vm.UUID, "run", "--username", "kali", "--password",
+		"kali", "--exe", "/usr/bin/ip", "addr", "show", "eth0")
+	out, err := getIP.Output()
+	if err != nil {
+		fmt.Printf("Error retrieving %s (%s) IP: %v", vm.Name, vm.UUID, err)
+		time.Sleep(10 * time.Second)
+	}
+
+	outStr := string(out)
+	re := regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
+
+	redBold := color.New(color.BgWhite, color.FgHiBlack, color.Bold).SprintFunc()
+
+	result := re.ReplaceAllStringFunc(outStr, func(match string) string {
+		return redBold(match)
+	})
+
+	fmt.Println("IP retrieved correctly:", result)
 }
 
 func stopVM(vm *virtualbox.Machine) {
