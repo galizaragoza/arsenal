@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/fatih/color"
@@ -12,90 +13,126 @@ import (
 	"github.com/sh-agilebot/go-virtualbox"
 )
 
+// IPRegex pre-compiled for performance
+var IPRegex = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
+
 type Config struct {
-	Kali     bool `opts:"help=Run Kali, short=k"`
-	Lab      bool `opts:"help=Run 1st lab after Kali, short=l"`
-	LabIndex int  `opts:"help=Run lab number X in the order you imported them (-l is implicit), short=i"`
-	StopAll  bool `opts:"help=Turn off every VM, short=s"`
+	Kali      bool   `opts:"help=Run Kali (Index 0), short=k"`
+	KaliName  string `opts:"help=Override Kali VM name"`
+	Lab       bool   `opts:"help=Run 1st lab (Index 1), short=l"`
+	LabIndex  int    `opts:"help=Run lab at Index X, short=i"`
+	LabName   string `opts:"help=Override Lab VM name"`
+	StopAll   bool   `opts:"help=Power off all VMs, short=s"`
+	PollSec   int    `opts:"help=Seconds between state polls, default=5"`
 }
 
-func runVM(vm *virtualbox.Machine) {
-	vm.Start()
-	for vm.State != "running" {
-		time.Sleep(15 * time.Second)
-		fmt.Printf("Waiting for %s (UUID %s) to start...\n", vm.Name, vm.UUID)
+// waitForState DRYs polling logic for both start and stop
+func waitForState(vm *virtualbox.Machine, target string, pollInterval time.Duration) {
+	t := virtualbox.MachineState(target)
+	for vm.State != t {
+		fmt.Printf("Waiting for %s (%s) to reach %s... Current: %s\n", vm.Name, vm.UUID, target, vm.State)
+		time.Sleep(pollInterval)
 		vm.Refresh()
 	}
+	fmt.Printf("Machine %s is now %s\n", vm.Name, vm.State)
+}
 
-	fmt.Printf("Machine %s (UUID %s) is %s\n", vm.Name, vm.UUID, vm.State)
-	fmt.Println("Trying to retrieve machine IP")
-	var err error
-
-	for range 10 {
-		getIP := exec.Command("vboxmanage", "guestcontrol", vm.UUID, "run", "--username", "kali", "--password",
-			"kali", "--exe", "/usr/bin/ip", "addr", "show", "eth0")
-		out, err := getIP.Output()
-		if err != nil {
-			fmt.Printf("Error retrieving %s (%s) IP: %v", vm.Name, vm.UUID, err)
-			time.Sleep(20 * time.Second)
-			continue
+// getIP attempts fast retrieval via GuestProperty, falls back to GuestControl
+func getIP(vm *virtualbox.Machine) string {
+	// 1. Try GuestProperty (Fast, no login)
+	cmd := exec.Command("vboxmanage", "guestproperty", "get", vm.UUID, "/VirtualBox/GuestInfo/Net/0/V4/IP")
+	out, err := cmd.Output()
+	if err == nil {
+		outStr := strings.TrimSpace(string(out))
+		if strings.HasPrefix(outStr, "Value: ") {
+			ip := strings.TrimPrefix(outStr, "Value: ")
+			if IPRegex.MatchString(ip) {
+				return ip
+			}
 		}
-
-		outStr := string(out)
-		re := regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
-
-		redBold := color.New(color.BgWhite, color.FgHiBlack, color.Bold).SprintFunc()
-
-		result := re.ReplaceAllStringFunc(outStr, func(match string) string {
-			return redBold(match)
-		})
-
-		fmt.Println("IP retrieved correctly:", result)
 	}
-	if err != nil {
-		fmt.Printf("Could not retrieve IP for machine %s (%s)", vm.Name, vm.UUID)
+
+	// 2. Fallback to GuestControl (Slow, requires credentials)
+	for i := 0; i < 5; i++ { // Fewer retries, fast feedback
+		cmd = exec.Command("vboxmanage", "guestcontrol", vm.UUID, "run",
+			"--username", "kali", "--password", "kali",
+			"--exe", "/usr/bin/ip", "addr", "show", "eth0")
+		out, err = cmd.Output()
+		if err == nil {
+			return IPRegex.FindString(string(out))
+		}
+		time.Sleep(5 * time.Second)
+	}
+	return ""
+}
+
+func runVM(vm *virtualbox.Machine, poll time.Duration) {
+	vm.Start()
+	waitForState(vm, "running", poll)
+
+	fmt.Println("Retrieving machine IP...")
+	ip := getIP(vm)
+	if ip != "" {
+		highlight := color.New(color.BgWhite, color.FgHiBlack, color.Bold).SprintFunc()
+		fmt.Printf("IP retrieved: %s\n", highlight(ip))
+	} else {
+		fmt.Printf("Could not retrieve IP for %s\n", vm.Name)
 	}
 }
 
-func stopVM(vm *virtualbox.Machine) {
+func stopVM(vm *virtualbox.Machine, poll time.Duration) {
 	vm.Stop()
-	for vm.State != "poweroff" {
-		time.Sleep(15 * time.Second)
-		fmt.Printf("Waiting for %s (UUID %s) to power off...\n", vm.Name, vm.UUID)
-		vm.Refresh()
+	waitForState(vm, "poweroff", poll)
+}
+
+func findVM(machines []*virtualbox.Machine, name string, index int) *virtualbox.Machine {
+	if name != "" {
+		for _, m := range machines {
+			if m.Name == name {
+				return m
+			}
+		}
 	}
-	fmt.Printf("Machine %s (UUID %s) is %s\n", vm.Name, vm.UUID, vm.State)
+	if index >= 0 && index < len(machines) {
+		return machines[index]
+	}
+	return nil
 }
 
 func main() {
 	c := Config{}
 	opts.Parse(&c)
+	poll := time.Duration(c.PollSec) * time.Second
+
 	vbox := virtualbox.NewManager()
 	machines, err := vbox.ListMachines(context.Background())
 	if err != nil {
-		fmt.Printf("Error getting machines: %v", err)
+		fmt.Printf("Fatal: Failed to list VMs: %v\n", err)
+		return
 	}
 
-	if c.Kali {
-		kali := machines[0]
-		runVM(kali)
-	}
-
-	if c.Lab || c.LabIndex != 0 {
-		var lab *virtualbox.Machine
-		if c.LabIndex != 0 {
-			index := int(c.LabIndex)
-			lab = machines[index]
-		} else {
-			lab = machines[1]
+	if c.Kali || c.KaliName != "" {
+		if k := findVM(machines, c.KaliName, 0); k != nil {
+			runVM(k, poll)
 		}
-		runVM(lab)
+	}
+
+	if c.Lab || c.LabIndex != 0 || c.LabName != "" {
+		idx := 1
+		if c.LabIndex != 0 {
+			idx = c.LabIndex
+		}
+		if l := findVM(machines, c.LabName, idx); l != nil {
+			runVM(l, poll)
+		}
 	}
 
 	if c.StopAll {
-		for _, machine := range machines {
-			stopVM(machine)
+		for _, m := range machines {
+			if m.State != "poweroff" {
+				stopVM(m, poll)
+			}
 		}
-		fmt.Println("All machines stopped correctly")
+		fmt.Println("All machines stopped.")
 	}
 }
