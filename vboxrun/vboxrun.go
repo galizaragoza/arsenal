@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os/exec"
 	"regexp"
-	"strings"
 	"time"
 
 	"github.com/fatih/color"
@@ -17,13 +16,13 @@ import (
 var IPRegex = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
 
 type Config struct {
-	Kali      bool   `opts:"help=Run Kali (Index 0), short=k"`
-	KaliName  string `opts:"help=Override Kali VM name"`
-	Lab       bool   `opts:"help=Run 1st lab (Index 1), short=l"`
-	LabIndex  int    `opts:"help=Run lab at Index X, short=i"`
-	LabName   string `opts:"help=Override Lab VM name"`
-	StopAll   bool   `opts:"help=Power off all VMs, short=s"`
-	PollSec   int    `opts:"help=Seconds between state polls, default=5"`
+	Kali     bool   `opts:"help=Run Kali (Index 0), short=k"`
+	KaliName string `opts:"help=Override Kali VM name"`
+	Lab      bool   `opts:"help=Run 1st lab (Index 1), short=l"`
+	LabIndex int    `opts:"help=Run lab at Index X, short=i"`
+	LabName  string `opts:"help=Override Lab VM name"`
+	StopAll  bool   `opts:"help=Power off all VMs, short=s"`
+	PollSec  int    `opts:"help=Seconds between state polls, default=5"`
 }
 
 // waitForState DRYs polling logic for both start and stop
@@ -39,25 +38,11 @@ func waitForState(vm *virtualbox.Machine, target string, pollInterval time.Durat
 
 // getIP attempts fast retrieval via GuestProperty, falls back to GuestControl
 func getIP(vm *virtualbox.Machine) string {
-	// 1. Try GuestProperty (Fast, no login)
-	cmd := exec.Command("vboxmanage", "guestproperty", "get", vm.UUID, "/VirtualBox/GuestInfo/Net/0/V4/IP")
-	out, err := cmd.Output()
-	if err == nil {
-		outStr := strings.TrimSpace(string(out))
-		if strings.HasPrefix(outStr, "Value: ") {
-			ip := strings.TrimPrefix(outStr, "Value: ")
-			if IPRegex.MatchString(ip) {
-				return ip
-			}
-		}
-	}
-
-	// 2. Fallback to GuestControl (Slow, requires credentials)
 	for i := 0; i < 5; i++ { // Fewer retries, fast feedback
-		cmd = exec.Command("vboxmanage", "guestcontrol", vm.UUID, "run",
+		cmd := exec.Command("vboxmanage", "guestcontrol", vm.UUID, "run",
 			"--username", "kali", "--password", "kali",
 			"--exe", "/usr/bin/ip", "addr", "show", "eth0")
-		out, err = cmd.Output()
+		out, err := cmd.Output()
 		if err == nil {
 			return IPRegex.FindString(string(out))
 		}
