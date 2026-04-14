@@ -67,7 +67,9 @@ func runVM(vm *virtualbox.Machine, poll time.Duration) {
 
 func stopVM(vm *virtualbox.Machine, poll time.Duration) {
 	vm.Stop()
+	fmt.Printf("Stopping vm %s (%s)", vm.Name, vm.UUID)
 	waitForState(vm, "poweroff", poll)
+	fmt.Printf("VM %s (%s) has stopped succesfully", vm.Name, vm.UUID)
 }
 
 func findVM(machines []*virtualbox.Machine, name string, index int) *virtualbox.Machine {
